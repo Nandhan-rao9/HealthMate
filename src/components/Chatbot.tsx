@@ -11,21 +11,47 @@ const Chatbot: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>("");
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return;
 
+    // Add the user message to the chat history
     const userMessage: Message = { text: input, sender: "user" };
     setMessages((prev) => [...prev, userMessage]);
 
-    // Simulating bot response
-    setTimeout(() => {
+    try {
+      // Make a POST request to your backend API to send the user's message
+      const response = await fetch("http://localhost:8000/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ message: input }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch response from the server.");
+      }
+
+      // Parse the JSON response from the server
+      const data = await response.json();
       const botResponse: Message = {
-        text: `You said: "${input}"`,
+        text: data.response,
         sender: "bot",
       };
-      setMessages((prev) => [...prev, botResponse]);
-    }, 500);
 
+      // Add the bot's response to the chat history
+      setMessages((prev) => [...prev, botResponse]);
+
+    } catch (error) {
+      // Handle any errors from the API call
+      const errorMessage: Message = {
+        text: "Sorry, something went wrong. Please try again later.",
+        sender: "bot",
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+
+    // Clear input field after sending
     setInput("");
   };
 
