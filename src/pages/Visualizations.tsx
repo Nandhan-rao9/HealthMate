@@ -274,7 +274,10 @@ export const Visualizations = () => {
           ) : (
             <p className="text-sm text-green-500">No deficiencies detected</p>
           )}
+          <h2 className="text-xl font-semibold mt-2">Potential Diseases</h2>
+          <h3><span className="text-lg text-red-500 mt-2">No Heart Risks</span></h3>
         </motion.div>
+        
       </div>
     </motion.div>
   );

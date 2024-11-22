@@ -297,7 +297,7 @@ def commit_nutrition_data():
     try:
         # Get data from the request
         data = request.get_json()
-        print(data)
+        
 
         # Extract food data and total nutrients
         food_data = data.get('foodData', [])
@@ -346,4 +346,4 @@ def chat():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=8000)
