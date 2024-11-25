@@ -2,7 +2,7 @@
 
 A full-stack web application designed to assist users with nutrition tracking and mental health support through advanced AI and data science.  
 
----
+
 
 ## Features  
 
