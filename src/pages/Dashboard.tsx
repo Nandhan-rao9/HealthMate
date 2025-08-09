@@ -1,10 +1,7 @@
-import React, { Suspense, useEffect, useState } from "react";
-import { Canvas } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { BarChart2, Utensils, Activity, Target } from "lucide-react";
 import axios from "axios";
-import { NutrientSphere } from "../components/NutrientSphere";
 import { AnimatedProgressRing } from "../components/AnimatedProgressRing";
 
 interface NutritionData {
@@ -14,14 +11,6 @@ interface NutritionData {
   fat: number;
 }
 
-interface Meal {
-  name: string;
-  time: string;
-  calories: number;
-  protein: number;
-  image: string;
-}
-
 export const Dashboard = () => {
   const [currentNutrition, setCurrentNutrition] = useState<NutritionData>({
     calories: 0,
@@ -29,7 +18,6 @@ export const Dashboard = () => {
     carbs: 0,
     fat: 0,
   });
-  const [recentMeals, setRecentMeals] = useState<Meal[]>([]);
 
   const nutritionTarget = {
     calories: 2346,
@@ -44,27 +32,23 @@ export const Dashboard = () => {
         const response = await axios.get("http://localhost:8000/getnutrition");
         const nutritionData = response.data;
 
-        setCurrentNutrition({
-          calories: nutritionData.calories,
-          protein: nutritionData.protein,
-          carbs: nutritionData.carbs,
-          fat: nutritionData.fat,
-        });
-
-        const newMeal = {
-          name: nutritionData.name,
-          time: new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-          calories: nutritionData.calories,
-          protein: nutritionData.protein,
-          image: `https://source.unsplash.com/featured/?${encodeURIComponent(
-            nutritionData.name
-          )},food`,
-        };
-
-        setRecentMeals((prevMeals) => [newMeal, ...prevMeals].slice(0, 5));
+        // Ensure the data exists and contains the required fields
+        if (
+          nutritionData &&
+          nutritionData[0].calories &&
+          nutritionData[0].protein &&
+          nutritionData[0].carbs &&
+          nutritionData[0].fat
+        ) {
+          setCurrentNutrition({
+            calories: nutritionData[0].calories,
+            protein: nutritionData[0].protein,
+            carbs: nutritionData[0].carbs,
+            fat: nutritionData[0].fat,
+          });
+        } else {
+          console.error("Invalid data structure", nutritionData);
+        }
       } catch (error) {
         console.error("Error fetching nutrition data:", error);
       }
@@ -142,7 +126,7 @@ export const Dashboard = () => {
               </div>
               <div className="flex items-center justify-center">
                 <AnimatedProgressRing
-                  progress={(value / target) * 100}
+                  progress={target ? (value / target) * 100 : 0} // Prevent division by zero
                   color={color}
                 />
               </div>

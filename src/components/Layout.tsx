@@ -34,7 +34,7 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
               whileHover={{ scale: 1.05 }}
             >
               <Camera className="h-8 w-8 text-blue-400" />
-              <span className="ml-2 text-xl font-semibold">NutriTrack</span>
+              <span className="ml-2 text-xl font-semibold">HealthMate</span>
             </motion.div>
             <div className="flex items-center space-x-4">
               {navItems.map(({ to, icon: Icon, label }) => (

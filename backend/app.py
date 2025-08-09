@@ -99,6 +99,152 @@ def get_food_info_from_usda(food_name):
         return None
 
 
+class MentalHealthChatbot:
+    def __init__(self, api_key: str):
+        self.client = OpenAI(api_key=api_key)
+        self.system_prompt = """
+        You are a compassionate and professional mental health expert. Your role is to:
+        1. Listen to the user's concerns with empathy and understanding.
+        2. Offer emotional validation and reassurance.
+        3. Provide coping strategies and self-care techniques.
+        4. Recognize signs of mental health distress or crisis, and gently guide the user toward professional help when necessary.
+
+        Important guidelines:
+        - Always maintain a supportive and non-judgmental tone.
+        - Do not provide medical diagnoses or offer harmful advice.
+        - Offer emotional validation and encourage self-care without judgment.
+        - If the user mentions suicidal thoughts or severe distress, provide resources for professional help and contact emergency services if necessary.
+        - Respect the user's privacy and confidentiality.
+        - Ensure responses are emotionally sensitive and encouraging.
+        """
+
+    def generate_response(self, user_message: str) -> str:
+        """Generate a supportive response from OpenAI GPT-3/4 model with a focus on mental health expertise"""
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4",  # Use the appropriate model
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                max_tokens=200
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+    def handle_crisis_indicators(self, message: str) -> bool:
+        """Check for crisis indicators in the user's message and provide immediate crisis intervention resources"""
+        crisis_keywords = ["suicide", "harm", "death", "self-harm", "hopeless", "worthless", "ending it", "I want to die"]
+        return any(keyword in message.lower() for keyword in crisis_keywords)
+
+    def get_crisis_resources(self) -> str:
+        """Return crisis resources if a user shows signs of being in immediate danger"""
+        return """
+        I'm really sorry that you're feeling this way. Your safety and well-being are so important, and I strongly encourage you to talk to someone who can provide more specialized support.
+        Please reach out to a counselor, therapist, or someone you trust. If you're in immediate danger, please contact emergency services.
+        Here are some resources you can reach out to:
+        - National Suicide Prevention Lifeline: 1-800-273-8255 (USA)
+        - Text HOME to 741741 to connect with a Crisis Text Line counselor (USA)
+        - If you're outside of the USA, please reach out to a local crisis helpline.
+        You are not alone, and there is support available for you.
+        """
+
+    def chat(self, user_message: str) -> str:
+        """Main chat function to process the user's message with a compassionate mental health response"""
+        if self.handle_crisis_indicators(user_message):
+            return self.get_crisis_resources()
+        
+        # Provide supportive responses based on the user's emotional state
+        response = self.generate_response(user_message)
+        
+        if "sad" in user_message.lower():
+            response = """
+            I'm really sorry you're feeling sad. It's completely okay to feel this way sometimes—emotions are a natural part of being human. 
+            It might help to talk about what’s on your mind, or even engage in something that brings you comfort. 
+            Sometimes, simple acts like taking a walk, doing something creative, or even reaching out to a friend can help you feel a bit better.
+            Remember, you're not alone in this, and it's okay to ask for support when you need it.
+            """
+        
+        elif "stressed" in user_message.lower():
+            response = """
+            Stress can feel overwhelming, but it's also something that can be managed with the right tools. 
+            Take a deep breath and try to focus on one thing at a time. Sometimes it can help to break things down into smaller tasks or take short breaks.
+            Be kind to yourself, and remember that it's okay to ask for help or talk about what's stressing you out.
+            You're doing the best you can, and that's enough.
+            """
+        
+        elif "overwhelmed" in user_message.lower():
+            response = """
+            It sounds like you're feeling overwhelmed, which is completely understandable. It’s important to recognize when things feel like too much. 
+            Try to take a step back and give yourself some space to breathe. Small moments of self-care, like resting or doing something you enjoy, can make a difference.
+            You're strong for recognizing how you feel, and you're capable of finding ways to navigate through this.
+            """
+        
+        return response
+
+        self.client = OpenAI(api_key=api_key)
+        self.system_prompt = """
+        You are a compassionate and professional mental health expert. Your goal is to:
+        1. Listen to the user's concerns with empathy and understanding.
+        2. Offer support, reassurance, and validation of their emotions.
+        3. Provide suggestions for self-care and coping strategies when appropriate.
+        4. Recognize signs of mental health distress or crisis and suggest professional help when necessary.
+
+        Important guidelines:
+        - Always maintain a supportive and non-judgmental tone.
+        - Do not provide medical diagnoses.
+        - Never minimize or dismiss the user's feelings or concerns.
+        - Recognize serious mental health issues (e.g., suicidal thoughts, self-harm, or trauma) and provide crisis resources.
+        - If the user is in distress, guide them towards professional help, such as a therapist or counselor.
+        - Respect the user's privacy and confidentiality.
+        - Be mindful of the fact that the user may be experiencing emotional or psychological challenges, so ensure your responses are sensitive.
+        """
+
+    
+        """Main chat function to process the user's message with a compassionate mental health response"""
+        if self.handle_crisis_indicators(user_message):
+            return self.get_crisis_resources()
+        
+        # If it's not a crisis, provide a compassionate response and coping strategies
+        response = self.generate_response(user_message)
+        
+        # Add empathetic follow-up if the user is expressing distress
+        if "feeling overwhelmed" in user_message.lower():
+            response += "\n\nIt’s completely okay to feel overwhelmed at times. It's important to take things one step at a time, and remember that you're doing the best you can. Consider taking a moment to breathe deeply or engage in a calming activity to ease your mind."
+        
+        elif "stressed" in user_message.lower():
+            response += "\n\nStress can be really challenging, and it's helpful to recognize when you need a break. Try to focus on activities that help you relax, like deep breathing, meditation, or talking to someone you trust."
+        
+        elif "sad" in user_message.lower():
+            response += "\n\nIt's okay to feel sad sometimes, and it’s important to acknowledge your feelings. Try not to be too hard on yourself. If it helps, journaling your emotions or speaking with a close friend or professional might provide some relief."
+
+        return response
+
+        self.client = OpenAI(api_key=api_key)
+        self.system_prompt = """
+        You are a compassionate, professional mental health support chatbot. 
+        Your primary goals are to:
+        1. Provide empathetic and supportive responses
+        2. Offer constructive coping strategies
+        3. Recognize serious mental health concerns
+        4. Encourage professional help when necessary
+
+        Important guidelines:
+        - Never provide medical diagnosis
+        - Always prioritize user safety
+        - Maintain a non-judgmental and supportive tone
+        - Suggest professional help for serious mental health issues
+        - Respect user privacy and confidentiality
+        """
+
+    
+        """Main chat function to process the user message"""
+        if self.handle_crisis_indicators(user_message):
+            return self.get_crisis_resources()
+        return self.generate_response(user_message)
+
+
 @app.route('/analyze-image', methods=['POST'])
 def analyze_image():
     """Endpoint for image analysis"""
@@ -151,6 +297,7 @@ def commit_nutrition_data():
     try:
         # Get data from the request
         data = request.get_json()
+        
 
         # Extract food data and total nutrients
         food_data = data.get('foodData', [])
@@ -177,25 +324,26 @@ def commit_nutrition_data():
 def get_nutrition_data():
     """Endpoint to get nutrition data (calories, protein, carbs, fat) from MongoDB"""
     try:
-        # Query the total_nutrients collection to fetch the latest nutrition data
-        total_nutrients_doc = total_nutrients_collection.find_one(sort=[("timestamp", -1)])
-
-        if not total_nutrients_doc:
-            return jsonify({'error': 'No nutrition data found in the database.'}), 404
-
-        # Extract nutrients from the latest document
-        total_nutrients = total_nutrients_doc.get("total_nutrients", {})
-        nutrition_data = {
-            'calories': total_nutrients.get('calories', 0),
-            'protein': total_nutrients.get('protein', 0),
-            'carbs': total_nutrients.get('carbs', 0),
-            'fat': total_nutrients.get('fat', 0)
-        }
-
-        return jsonify(nutrition_data), 200
+        # Query the total_nutrients collection for the latest data
+        total_nutrients = total_nutrients_collection.find().sort('timestamp', -1).limit(1)
+        if total_nutrients:
+            return jsonify([doc['total_nutrients'] for doc in total_nutrients]), 200
+        else:
+            return jsonify({'message': 'No nutrition data available'}), 404
     except Exception as e:
-        return jsonify({'error': 'Failed to retrieve nutrition data. Please try again later.'}), 500
+        return jsonify({'error': 'Failed to fetch nutrition data. Please try again.'}), 500
+
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    """Endpoint for mental health chatbot interaction"""
+    user_message = request.json.get("message", "")
+    chatbot = MentalHealthChatbot(api_key=os.getenv('OPENAI_API_KEY'))
+
+    # Get response from the chatbot
+    response = chatbot.chat(user_message)
+    return jsonify({'response': response})
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8000)
+    app.run(debug=True, host='0.0.0.0', port=8000)
