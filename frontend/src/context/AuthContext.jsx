@@ -1,39 +1,44 @@
-import React, { createContext, useState, useContext } from 'react';
+import React, { createContext, useState, useContext, useMemo, useCallback } from 'react';
 
 const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null); // Is user logged in? (null = no)
-  const [profileComplete, setProfileComplete] = useState(false); // Has user onboarded?
+  const [user, setUser] = useState(null);
+  const [profileComplete, setProfileComplete] = useState(false);
+  const [profileData, setProfileData] = useState(null);
 
-
-  const login = (userData) => {
+  const login = useCallback((userData) => {
     setUser(userData);
-    setProfileComplete(false); 
-  };
+    setProfileComplete(false);
+    setProfileData(null);
+  }, []);
 
-  const register = (userData) => {
+  const register = useCallback((userData) => {
     setUser(userData);
-    setProfileComplete(false); // New users always need onboarding
-  };
-  
-  const completeOnboarding = () => {
+    setProfileComplete(false);
+    setProfileData(null);
+  }, []);
+
+  const completeOnboarding = useCallback((data) => {
+    setProfileData(data);
     setProfileComplete(true);
-  };
+  }, []);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     setUser(null);
     setProfileComplete(false);
-  };
+    setProfileData(null);
+  }, []);
 
-  const value = {
+  const value = useMemo(() => ({
     user,
     profileComplete,
+    profileData,
     login,
     register,
     completeOnboarding,
     logout,
-  };
+  }), [user, profileComplete, profileData, login, register, completeOnboarding, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

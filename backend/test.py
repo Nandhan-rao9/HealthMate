@@ -27,16 +27,16 @@ def get_nutrition_data(food_name, usda_api_key):
 
     # Step 2: Get nutrient details
     details_url = f"https://api.nal.usda.gov/fdc/v1/food/{fdc_id}"
-    details_params = {"api_key": usda_api_key}
-    details_response = requests.get(details_url, params=details_params)
+    details_response = requests.get(details_url, params={"api_key": usda_api_key})
     details_data = details_response.json()
 
-    # Step 3: Extract per-100 g nutrients
+    # Step 3: Map nutrients (add fiber 1079)
     nutrient_map = {
         1008: "calories",
         1003: "protein",
         1004: "fat",
         1005: "carbohydrates",
+        1079: "fiber",
         1087: "calcium",
         1089: "iron",
         1090: "magnesium",
@@ -47,7 +47,9 @@ def get_nutrition_data(food_name, usda_api_key):
         1162: "vitamin_c",
     }
 
-    nutrients = {}
+    # Initialize all nutrients as 0
+    nutrients = {name: {"amount_per_100g": 0, "unit": ""} for name in nutrient_map.values()}
+
     for nutrient in details_data.get("foodNutrients", []):
         # Try all possible keys
         nid = (

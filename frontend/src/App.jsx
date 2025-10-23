@@ -1,60 +1,66 @@
-// src/App.js
 import React from 'react';
-import { Routes, Route, Link } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 
 import Register from './authentication/Register';
 import Login from './authentication/Login';
 import Onboarding from './Onboarding';
+import Dashboard from './pages/Dashboard';
+import AddMeal from './pages/AddMeal';
 
-function MainApp() {
+function MainAppLayout() {
   const { logout } = useAuth();
   return (
-    <div style={{ padding: '2rem', textAlign: 'center' }}>
-      <nav style={{ padding: '1rem', backgroundColor: '#1e1e1e'}}>
-        <Link to="/dashboard" style={{ margin: '0 1rem', color: 'white' }}>Dashboard</Link>
-        <Link to="/add-meal" style={{ margin: '0 1rem', color: 'white' }}>Add Meal</Link>
-        <button onClick={logout} style={{ marginLeft: '2rem' }}>Logout</button>
+    <div>
+      <nav style={{ padding: '1rem', backgroundColor: '#1e1e1e', borderBottom: '1px solid #333' }}>
+        <a href="/dashboard" style={{ margin: '0 1rem', color: 'white', fontWeight: 'bold' }}>Dashboard</a>
+        <a href="/add-meal" style={{ margin: '0 1rem', color: 'white', fontWeight: 'bold' }}>Add Meal</a>
+        <button onClick={logout} style={{ marginLeft: '2rem', background: 'none', border: '1px solid #555', color: 'white', padding: '0.3rem 0.8rem', cursor: 'pointer' }}>
+          Logout
+        </button>
       </nav>
-      <h1 style={{marginTop: '2rem'}}>Welcome to Your Dashboard!</h1>
-      <p>This is the main application.</p>
+      <Outlet />
     </div>
   );
 }
 
-// --- Placeholder for your auth pages ---
 function AuthLayout() {
   return (
     <div>
       <nav style={{ padding: '1rem', backgroundColor: '#1e1e1e', textAlign: 'center' }}>
-        <Link to="/login" style={{ margin: '0 1rem', color: 'white' }}>Login</Link>
-        <Link to="/register" style={{ margin: '0 1rem', color: 'white' }}>Register</Link>
+        <a href="/login" style={{ margin: '0 1rem', color: 'white' }}>Login</a>
+        <a href="/register" style={{ margin: '0 1rem', color: 'white' }}>Register</a>
       </nav>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="*" element={<Login />} /> {/* Default to login */}
+        <Route path="*" element={<Navigate to="/login" />} />
       </Routes>
     </div>
   );
 }
 
-// --- The Main App Component ---
 function App() {
-  const { user, profileComplete } = useAuth(); // <-- Get the global state
+  const { user, profileComplete } = useAuth();
 
-  if (!user) {
-    // Not logged in? Show Login/Register pages
-    return <AuthLayout />;
-  }
+  if (user === null) return <p>Loading...</p>; // prevent blank screen
 
-  if (!profileComplete) {
-    // Logged in, but profile incomplete? Show Onboarding
-    return <Onboarding />;
-  }
+  return (
+    <Routes>
+      {/* Main App Routes */}
+      <Route path="/*" element={user && profileComplete ? <MainAppLayout /> : <Navigate to={user ? "/onboarding" : "/auth/login"} />}>
+        <Route path="dashboard" element={<Dashboard />} />
+        <Route path="add-meal" element={<AddMeal />} />
+        <Route path="*" element={<Navigate to="dashboard" />} />
+      </Route>
 
-  // Logged in AND profile complete? Show the Main App
-  return <MainApp />;
+      {/* Onboarding */}
+      <Route path="/onboarding" element={user && !profileComplete ? <Onboarding /> : <Navigate to="/dashboard" />} />
+
+      {/* Auth */}
+      <Route path="/auth/*" element={!user ? <AuthLayout /> : <Navigate to="/dashboard" />} />
+    </Routes>
+  );
 }
 
 export default App;
