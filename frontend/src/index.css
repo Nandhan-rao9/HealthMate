@@ -1,0 +1,38 @@
+/* src/index.css (add to bottom) */
+.onboarding-container label {
+  text-align: left;
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-bottom: -0.5rem;
+  color: #c0c0c0;
+}
+
+.onboarding-container select {
+  padding: 0.75rem;
+  font-size: 1rem;
+  background-color: #333;
+  border: 1px solid #555;
+  color: #fff;
+  border-radius: 4px;
+}
+
+.results-card {
+  background-color: #2a2a2a;
+  padding: 1.5rem;
+  border-radius: 8px;
+  margin-top: 1.5rem;
+  border: 1px solid #444;
+}
+
+.results-card h3 {
+  margin-top: 0;
+  color: white;
+}
+.results-card p {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  color: #e0e0e0;
+}
+.results-card p strong {
+  color: #00aaff;
+}
