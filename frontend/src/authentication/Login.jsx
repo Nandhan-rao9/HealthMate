@@ -1,59 +1,59 @@
+// src/authentication/Login.js
 import React, { useState } from 'react';
-import './auth.css';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext'; 
+import useAuthStore from '../store/useAuthStore'; 
 
 function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
 
-  const { login } = useAuth();
-  const navigate = useNavigate(); // <-- add this
+  const login = useAuthStore(state => state.login);
+  const navigate = useNavigate(); 
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setMessage('');
 
+    // --- MOCK API CALL START ---
     try {
-      const response = await fetch('http://localhost:5000/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
+        // Simulate fetch delay and success
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Mock successful login: user and token
+        const mockToken = `mock-token-${username}`;
+        
+        // Mock profile check: assume 'testuser' is complete, others are not
+        const profileCompleteStatus = username === 'testuser'; 
 
-      const data = await response.json();
+        // 1. Update store
+        login({ username, token: mockToken }, profileCompleteStatus);
 
-      if (response.ok) {
-        // update context
-        login({ username, token: data.token });
-
-        // navigate after login
-        if (data.profileComplete) {
-          navigate('/dashboard'); // go to dashboard
+        // 2. Navigate
+        if (profileCompleteStatus) {
+            navigate('/dashboard'); 
         } else {
-          navigate('/onboarding'); // go to onboarding
+            navigate('/onboarding'); 
         }
 
-      } else {
-        setMessage(data.error);
-      }
     } catch (error) {
-      console.log('error occurred');
-      setMessage('Error occurred during login');
+        console.error('Mock error:', error);
+        setMessage('Error occurred during login. Try "testuser" / "123".');
     }
+    // --- MOCK API CALL END ---
   };
 
   return (
     <div className="auth-container">
-      <form className="auth-form" onSubmit={handleSubmit}>
-        <h2>Login</h2>
+      <form className="auth-form" onSubmit={handleSubmit} style={{backgroundColor: '#2e2e2e', border: '1px solid #444', color: 'white'}}>
+        <h2 style={{color: '#00ccff'}}>Login</h2>
         <input
           type="text"
           placeholder="Username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           required
+          style={{backgroundColor: '#3e3e3e', color: 'white', border: '1px solid #555'}}
         />
         <input
           type="password"
@@ -61,12 +61,13 @@ function Login() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
+          style={{backgroundColor: '#3e3e3e', color: 'white', border: '1px solid #555'}}
         />
-        <button type="submit">Login</button>
-        {message && <p>{message}</p>}
+        <button type="submit" style={{backgroundColor: '#00ccff', color: 'black'}}>Login</button>
+        {message && <p style={{color: '#ff6666'}}>{message}</p>}
       </form>
-      <p style={{ textAlign: 'center', marginTop: '1rem' }}>
-        Don't have an account? <Link to="/register" style={{ color: '#007bff' }}>Register</Link>      
+      <p style={{ textAlign: 'center', marginTop: '1rem', color: '#aaa' }}>
+        Don't have an account? <Link to="/register" style={{ color: '#00ccff' }}>Register</Link>      
       </p>
     </div>
   );

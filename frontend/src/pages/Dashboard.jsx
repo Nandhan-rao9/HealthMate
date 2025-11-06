@@ -1,20 +1,21 @@
+// src/pages/Dashboard.js
 import React from 'react';
-import { useAuth } from '../context/AuthContext';
+import useAuthStore from '../store/useAuthStore';
 
 function GoalsDisplay() {
-  const { profileData } = useAuth();
+  const profileData = useAuthStore(state => state.profileData);
 
   if (!profileData) {
     return (
-      <div className="results-card" style={{ maxWidth: '400px', margin: '2rem auto' }}>
-        <p>Loading user profile...</p>
+      <div className="results-card" style={{ maxWidth: '400px', margin: '2rem auto', backgroundColor: '#2e2e2e', border: '1px solid #444', color: 'white' }}>
+        <p>Goals not yet set. Complete onboarding.</p>
       </div>
     );
   }
 
   return (
-    <div className="results-card" style={{ maxWidth: '400px', margin: '2rem auto' }}>
-      <h3>Your Daily Goals</h3>
+    <div className="results-card" style={{ maxWidth: '400px', margin: '2rem auto', backgroundColor: '#2e2e2e', border: '1px solid #444', color: 'white' }}>
+      <h3 style={{color: '#00ccff'}}>Your Daily Goals</h3>
       <p><strong>Target Calories:</strong> {profileData.calorieGoal} kcal</p>
       <p><strong>Maintenance (TDEE):</strong> {profileData.tdee} kcal</p>
       <p><strong>Resting (BMR):</strong> {profileData.bmr} kcal</p>
@@ -23,14 +24,15 @@ function GoalsDisplay() {
 }
 
 function Dashboard() {
-  const { user } = useAuth();
-
-  if (!user) return <p>Loading user info...</p>;
+  const user = useAuthStore(state => state.user);
+  
+  // Use user.username, but provide a default if user is null (shouldn't happen here)
+  const username = user?.username || 'Guest'; 
 
   return (
     <div style={{ padding: '2rem', maxWidth: '1000px', margin: '0 auto' }}>
-      <h1 style={{ color: 'white' }}>Welcome, {user.username}!</h1>
-      <p style={{ color: '#aaa' }}>This is your main dashboard. You can track your daily progress here.</p>
+      <h1 style={{ color: '#00ccff' }}>Welcome, {username}!</h1>
+      <p style={{ color: '#aaa' }}>This is your main dashboard. Track your progress here.</p>
       <GoalsDisplay />
     </div>
   );
