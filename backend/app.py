@@ -1,349 +1,329 @@
 from flask import Flask, request, jsonify
+from flask_pymongo import PyMongo
+from flask_bcrypt import Bcrypt
 from flask_cors import CORS
-import requests
 import os
-from datetime import datetime
-from openai import OpenAI
-from dotenv import load_dotenv
-import base64
-from pymongo import MongoClient
+import io # <-- Added for AI
 import json
+import requests
+from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# --- AI Imports ---
+from google.cloud import vision
+import google.generativeai as genai
 
-app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "http://localhost:5173", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}})
+load_dotenv() # Loads .env file for API keys
 
-# Initialize OpenAI client
-openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+app=Flask(__name__)
 
-# USDA API configuration
-USDA_API_KEY = os.getenv('USDA_API_KEY')
-USDA_BASE_URL = 'https://api.nal.usda.gov/fdc/v1'
+# --- App Config ---
+app.config["MONGO_URI"]="mongodb+srv://nandhan:ZuSVOd21Ik0Oqvxi@cluster0.opua5jp.mongodb.net/healthmate_db?retryWrites=true&w=majority&appName=Cluster0"
 
-# MongoDB connection
-client = MongoClient(os.getenv('MONGO_URI'))
-db = client['nutrition_db']
-food_collection = db['food_data']
-total_nutrients_collection = db['total_nutrients']
+mongo=PyMongo(app)
+bcrypt=Bcrypt(app)
+CORS(app)
 
-# User data structure for nutritional information
-user_nutritional_data = {'food_items': []}
+users_collection = mongo.db.users
 
-class ImageAnalyzer:
-    def __init__(self, api_key):
-        self.client = OpenAI(api_key=api_key)
+# --- AI PROMPT TEMPLATE ---
+PROMPT_TEMPLATE = """
+You are an expert food classifier. I will give you a list of
+raw labels detected from an image (with confidence scores), and a 
+target number of items.
+Your job is to analyze this list and return only the specific, 
+distinct food dishes, prioritizing high-confidence labels.
 
-    def encode_image(self, image_file):
-        """Encode image from file upload to base64 string."""
-        image_data = image_file.read()
-        return base64.b64encode(image_data).decode('utf-8')
+RULES:
+1.  **Analyze this list of (label, score) tuples:**
+    {raw_labels_with_scores}
 
-    def analyze_image_ML(self, image_file, prompt="What food items are in this image? Please list them separately, just identify the eatables and if the food has any harmful products give a warning message"):
-        """Analyze an image using OpenAI's Vision API."""
-        try:
-            base64_image = self.encode_image(image_file)
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                    ]
-                }],
-                max_tokens=300
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            raise Exception(f"Error analyzing image: {str(e)}")
+2.  **Filter Heavily:**
+    - IGNORE generic categories (e.g., "Food", "Dish", "Meal", "Staple food", "Lunch", "Breakfast").
+    - IGNORE common ingredients (e.g., "Meat", "Vegetable", "Rice", "Cheese").
+    - IGNORE non-food items (e.g., "Tableware", "Platter", "Serveware", "Dishware").
+
+3.  **Find the Most Specific, High-Confidence Items:**
+    - **RULE A:** TRUST THE SCORES. A specific item with a high score 
+      (like "Chicken" at 0.89) is almost always the correct answer.
+    - **RULE B:** DO NOT INVENT A DISH. If you see ("Chicken", 0.89) and 
+      ("White rice", 0.88), list BOTH. Do *not* combine them into 
+      "Stew" if "Stew" has a much lower score (0.76).
+    - **RULE C:** REMOVE REDUNDANCY. If you see ("Rice", 0.83) and 
+      ("White rice", 0.88), you must *only* keep "White rice". 
+      If you see "Salad" and "Greek salad", keep "Greek salad".
+
+4.  **Format the Output:**
+    - Return a JSON list of strings.
+    - The list should contain the top {item_count} most prominent, distinct 
+      dishes, sorted by their original confidence score.
+    - If no specific dishes are found, return an empty list [].
+
+JSON Response:
+"""
+
+# --- AUTH ENDPOINTS ---
+
+@app.route("/")
+def home():
+    return "Flask is ON"
+
+@app.route("/register",methods=["POST"])
+def register():
+    data=request.get_json()
+    username = data.get("username")
+    password=data.get("password")
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+
+    existing_user = users_collection.find_one({"username": username})
+    if existing_user:
+        return jsonify({"error": "Username already exists"}), 400
+    
+    hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+
+    new_user={
+        "username":username,
+        "password": hashed_password
+    }
+    users_collection.insert_one(new_user)
+    return jsonify({"message":"user registered successfully"}), 201
 
 
-def get_food_info_from_usda(food_name):
-    """Fetch food information from USDA API"""
+@app.route("/login",methods=["POST"])
+def login():
+    data=request.get_json()
+    username=data.get("username")
+    password=data.get("password")
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+
+    user = users_collection.find_one({"username": username})
+
+    if user and bcrypt.check_password_hash(user["password"],password):
+        return jsonify({"message": "login success"}), 200
+    else:
+        return jsonify({"error": "invalid pass or user"}), 401
+
+# --- AI HELPER FUNCTIONS ---
+
+def get_raw_labels_from_vision(image_content): # <-- CHANGED from image_path
+    """
+    Step 1: Use Google Vision API to get a raw list of (label, score) tuples.
+    Accepts image content (bytes) directly.
+    """
+    print("--- [Vision API] Processing image content ---")
+    
     try:
-        search_url = f"{USDA_BASE_URL}/foods/search"
-        params = {'api_key': USDA_API_KEY, 'query': food_name, 'dataType': ["Survey (FNDDS)"], 'pageSize': 1}
-        response = requests.get(search_url, params=params)
-        response.raise_for_status()
+        # This is from your script. It works, so we'll keep it.
+        # Make sure 'credentials.json' is in your backend folder.
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials.json'
+        client = vision.ImageAnnotatorClient()
+    except Exception as e:
+        print(f"Error: Could not initialize Vision client. {e}")
+        return []
 
-        data = response.json()
-        if data['foods']:
-            food = data['foods'][0]
-            nutrients = food.get('foodNutrients', [])
+    try:
+        # Use the image_content bytes directly
+        image = vision.Image(content=image_content)
+        response = client.label_detection(image=image)
+        
+        if response.error.message:
+            print(f"Vision API Error: {response.error.message}")
+            return []
+            
+        label_data = []
+        for label in response.label_annotations:
+            label_data.append((label.description, round(label.score, 2)))
+        return label_data
+        
+    except Exception as e:
+        print(f"Error during Vision API call: {e}")
+        return []
 
-            nutrition_info = {
-                'calories': next((n['value'] for n in nutrients if n['nutrientName'] == 'Energy'), 0),
-                'protein': next((n['value'] for n in nutrients if n['nutrientName'] == 'Protein'), 0),
-                'carbs': next((n['value'] for n in nutrients if n['nutrientName'] == 'Carbohydrate, by difference'), 0),
-                'fat': next((n['value'] for n in nutrients if n['nutrientName'] == 'Total lipid (fat)'), 0),
-                'fiber': next((n['value'] for n in nutrients if n['nutrientName'] == 'Fiber, total dietary'), 0),
-                'vitamins': {
-                    'a': next((n['value'] for n in nutrients if 'Vitamin A' in n['nutrientName']), 0),
-                    'c': next((n['value'] for n in nutrients if 'Vitamin C' in n['nutrientName']), 0),
-                    'd': next((n['value'] for n in nutrients if 'Vitamin D' in n['nutrientName']), 0),
-                    'e': next((n['value'] for n in nutrients if 'Vitamin E' in n['nutrientName']), 0)
-                },
-                'minerals': {
-                    'iron': next((n['value'] for n in nutrients if 'Iron' in n['nutrientName']), 0),
-                    'calcium': next((n['value'] for n in nutrients if 'Calcium' in n['nutrientName']), 0),
-                    'potassium': next((n['value'] for n in nutrients if 'Potassium' in n['nutrientName']), 0)
-                }
-            }
+def filter_labels_with_gemini(raw_labels_with_scores, item_count):
+    """
+    Step 2: Use Gemini and a prompt template to filter the raw list.
+    (Copied directly from your script)
+    """
+    print("--- [Gemini LLM] Filtering raw labels... ---")
+    
+    try:
+        api_key = os.environ.get('GEMINI_API_KEY') # Loaded from .env
+        if not api_key:
+            print("Error: GEMINI_API_KEY environment variable not set.")
+            return []
+        genai.configure(api_key=api_key)
+    except Exception as e:
+        print(f"Error: Could not configure Gemini. {e}")
+        return []
+        
+    YOUR_MODEL_NAME = "models/gemini-2.5-flash" 
+    
+    print(f"--- [Gemini LLM] Using model: {YOUR_MODEL_NAME} ---")
+    model = genai.GenerativeModel(YOUR_MODEL_NAME)
+    
+    prompt = PROMPT_TEMPLATE.format(
+        raw_labels_with_scores=raw_labels_with_scores, 
+        item_count=item_count
+    )
+    
+    try:
+        response = model.generate_content(prompt)
+        response_text = response.text.strip().lstrip("```json").rstrip("```").strip()
+        
+        final_list = json.loads(response_text)
+        return final_list
+        
+    except Exception as e:
+        print(f"Error during Gemini API call: {e}")
+        try:
+            print(f"Raw response was: {response.text}")
+        except NameError:
+            pass 
+        return []
 
-            return nutrition_info
+# --- AI ENDPOINT ---
+
+@app.route("/identify", methods=["POST"])
+def identify_food_endpoint():
+    # 1. Check for the image file
+    if 'file' not in request.files:
+        return jsonify({"error": "No 'file' part in the request"}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+
+    # 2. Get the item count (default to 3)
+    try:
+        # We'll ask for 3 items by default to get more options
+        item_count = int(request.form.get('count', 3)) 
+    except ValueError:
+        return jsonify({"error": "'count' must be an integer"}), 400
+
+    # 3. Read image content
+    try:
+        image_content = file.read()
+    except Exception as e:
+        return jsonify({"error": f"Could not read file: {e}"}), 500
+
+    # 4. Run the 2-step AI pipeline
+    raw_labels = get_raw_labels_from_vision(image_content)
+    
+    if not raw_labels:
+        return jsonify({"error": "Could not analyze image. Vision API returned no labels."}), 500
+        
+    final_dishes = filter_labels_with_gemini(raw_labels, item_count)
+    
+    # 5. Return the final list of food names
+    return jsonify({
+        "detected_dishes": final_dishes,
+        "raw_labels_for_debug": raw_labels
+    })
+
+# --- NUTRITION HELPER FUNCTION ---
+
+def get_nutrition_data(food_name, quantity_g, usda_api_key):
+    """
+    Fetches nutrient data from USDA and scales it to the requested quantity.
+    """
+    print(f"🔎 Fetching data for {quantity_g}g of {food_name}")
+
+    if not usda_api_key:
+        print("❌ Error: USDA_API_KEY missing.")
         return None
+    
+    try:
+        search_url = "https://api.nal.usda.gov/fdc/v1/foods/search"
+        search_params = {"api_key": usda_api_key, "query": food_name, "pageSize": 1}
+        search_response = requests.get(search_url, params=search_params)
+        search_response.raise_for_status() 
+        search_data = search_response.json()
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching USDA data: {e}")
+        print(f"❌ Search error: {e}")
         return None
 
+    if "foods" not in search_data or len(search_data["foods"]) == 0:
+        print(f"❌ No results found for {food_name}")
+        return None
 
-class MentalHealthChatbot:
-    def __init__(self, api_key: str):
-        self.client = OpenAI(api_key=api_key)
-        self.system_prompt = """
-        You are a compassionate and professional mental health expert. Your role is to:
-        1. Listen to the user's concerns with empathy and understanding.
-        2. Offer emotional validation and reassurance.
-        3. Provide coping strategies and self-care techniques.
-        4. Recognize signs of mental health distress or crisis, and gently guide the user toward professional help when necessary.
-
-        Important guidelines:
-        - Always maintain a supportive and non-judgmental tone.
-        - Do not provide medical diagnoses or offer harmful advice.
-        - Offer emotional validation and encourage self-care without judgment.
-        - If the user mentions suicidal thoughts or severe distress, provide resources for professional help and contact emergency services if necessary.
-        - Respect the user's privacy and confidentiality.
-        - Ensure responses are emotionally sensitive and encouraging.
-        """
-
-    def generate_response(self, user_message: str) -> str:
-        """Generate a supportive response from OpenAI GPT-3/4 model with a focus on mental health expertise"""
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-4",  # Use the appropriate model
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                max_tokens=200
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            return f"Error: {str(e)}"
-
-    def handle_crisis_indicators(self, message: str) -> bool:
-        """Check for crisis indicators in the user's message and provide immediate crisis intervention resources"""
-        crisis_keywords = ["suicide", "harm", "death", "self-harm", "hopeless", "worthless", "ending it", "I want to die"]
-        return any(keyword in message.lower() for keyword in crisis_keywords)
-
-    def get_crisis_resources(self) -> str:
-        """Return crisis resources if a user shows signs of being in immediate danger"""
-        return """
-        I'm really sorry that you're feeling this way. Your safety and well-being are so important, and I strongly encourage you to talk to someone who can provide more specialized support.
-        Please reach out to a counselor, therapist, or someone you trust. If you're in immediate danger, please contact emergency services.
-        Here are some resources you can reach out to:
-        - National Suicide Prevention Lifeline: 1-800-273-8255 (USA)
-        - Text HOME to 741741 to connect with a Crisis Text Line counselor (USA)
-        - If you're outside of the USA, please reach out to a local crisis helpline.
-        You are not alone, and there is support available for you.
-        """
-
-    def chat(self, user_message: str) -> str:
-        """Main chat function to process the user's message with a compassionate mental health response"""
-        if self.handle_crisis_indicators(user_message):
-            return self.get_crisis_resources()
-        
-        # Provide supportive responses based on the user's emotional state
-        response = self.generate_response(user_message)
-        
-        if "sad" in user_message.lower():
-            response = """
-            I'm really sorry you're feeling sad. It's completely okay to feel this way sometimes—emotions are a natural part of being human. 
-            It might help to talk about what’s on your mind, or even engage in something that brings you comfort. 
-            Sometimes, simple acts like taking a walk, doing something creative, or even reaching out to a friend can help you feel a bit better.
-            Remember, you're not alone in this, and it's okay to ask for support when you need it.
-            """
-        
-        elif "stressed" in user_message.lower():
-            response = """
-            Stress can feel overwhelming, but it's also something that can be managed with the right tools. 
-            Take a deep breath and try to focus on one thing at a time. Sometimes it can help to break things down into smaller tasks or take short breaks.
-            Be kind to yourself, and remember that it's okay to ask for help or talk about what's stressing you out.
-            You're doing the best you can, and that's enough.
-            """
-        
-        elif "overwhelmed" in user_message.lower():
-            response = """
-            It sounds like you're feeling overwhelmed, which is completely understandable. It’s important to recognize when things feel like too much. 
-            Try to take a step back and give yourself some space to breathe. Small moments of self-care, like resting or doing something you enjoy, can make a difference.
-            You're strong for recognizing how you feel, and you're capable of finding ways to navigate through this.
-            """
-        
-        return response
-
-        self.client = OpenAI(api_key=api_key)
-        self.system_prompt = """
-        You are a compassionate and professional mental health expert. Your goal is to:
-        1. Listen to the user's concerns with empathy and understanding.
-        2. Offer support, reassurance, and validation of their emotions.
-        3. Provide suggestions for self-care and coping strategies when appropriate.
-        4. Recognize signs of mental health distress or crisis and suggest professional help when necessary.
-
-        Important guidelines:
-        - Always maintain a supportive and non-judgmental tone.
-        - Do not provide medical diagnoses.
-        - Never minimize or dismiss the user's feelings or concerns.
-        - Recognize serious mental health issues (e.g., suicidal thoughts, self-harm, or trauma) and provide crisis resources.
-        - If the user is in distress, guide them towards professional help, such as a therapist or counselor.
-        - Respect the user's privacy and confidentiality.
-        - Be mindful of the fact that the user may be experiencing emotional or psychological challenges, so ensure your responses are sensitive.
-        """
-
-    
-        """Main chat function to process the user's message with a compassionate mental health response"""
-        if self.handle_crisis_indicators(user_message):
-            return self.get_crisis_resources()
-        
-        # If it's not a crisis, provide a compassionate response and coping strategies
-        response = self.generate_response(user_message)
-        
-        # Add empathetic follow-up if the user is expressing distress
-        if "feeling overwhelmed" in user_message.lower():
-            response += "\n\nIt’s completely okay to feel overwhelmed at times. It's important to take things one step at a time, and remember that you're doing the best you can. Consider taking a moment to breathe deeply or engage in a calming activity to ease your mind."
-        
-        elif "stressed" in user_message.lower():
-            response += "\n\nStress can be really challenging, and it's helpful to recognize when you need a break. Try to focus on activities that help you relax, like deep breathing, meditation, or talking to someone you trust."
-        
-        elif "sad" in user_message.lower():
-            response += "\n\nIt's okay to feel sad sometimes, and it’s important to acknowledge your feelings. Try not to be too hard on yourself. If it helps, journaling your emotions or speaking with a close friend or professional might provide some relief."
-
-        return response
-
-        self.client = OpenAI(api_key=api_key)
-        self.system_prompt = """
-        You are a compassionate, professional mental health support chatbot. 
-        Your primary goals are to:
-        1. Provide empathetic and supportive responses
-        2. Offer constructive coping strategies
-        3. Recognize serious mental health concerns
-        4. Encourage professional help when necessary
-
-        Important guidelines:
-        - Never provide medical diagnosis
-        - Always prioritize user safety
-        - Maintain a non-judgmental and supportive tone
-        - Suggest professional help for serious mental health issues
-        - Respect user privacy and confidentiality
-        """
-
-    
-        """Main chat function to process the user message"""
-        if self.handle_crisis_indicators(user_message):
-            return self.get_crisis_resources()
-        return self.generate_response(user_message)
-
-
-@app.route('/analyze-image', methods=['POST'])
-def analyze_image():
-    """Endpoint for image analysis"""
-    if 'image' not in request.files:
-        return jsonify({'error': 'No image provided'}), 400
+    fdc_id = search_data["foods"][0]["fdcId"]
+    actual_name = search_data["foods"][0]["description"]
+    print(f"✅ Found '{actual_name}' (FDC ID: {fdc_id})")
     
     try:
-        # Initialize the image analyzer
-        analyzer = ImageAnalyzer(os.getenv('OPENAI_API_KEY'))
+        details_url = f"https://api.nal.usda.gov/fdc/v1/food/{fdc_id}"
+        details_params = {"api_key": usda_api_key}
+        details_response = requests.get(details_url, params=details_params)
+        details_response.raise_for_status()
+        details_data = details_response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Details error: {e}")
+        return None
+    
+    nutrient_map = {
+        1008: "calories", 1003: "protein", 1004: "fat", 1005: "carbohydrates",
+        1087: "calcium", 1089: "iron", 1090: "magnesium", 1095: "zinc",
+        1106: "vitamin_a", 1110: "vitamin_d", 1109: "vitamin_e", 1162: "vitamin_c",
+    }
+    
+    scaling_factor = quantity_g / 100.0
+    calculated_nutrients = {}
 
-        # Analyze the image
-        image_file = request.files['image']
-        food_items = analyzer.analyze_image_ML(image_file)
-
-        # Parse the food items (assuming they're returned as a comma-separated list)
-        foods = [item.strip() for item in food_items.split('\n') if item.strip()]
-
-        # List of potentially harmful ingredients
-        harmful_ingredients = ["sugar", "sodium", "trans fat", "artificial sweeteners", "MSG", "high fructose corn syrup"]
-
-        # Get nutrition info for each identified food
-        results = []
-        for food in foods:
-            nutrition_info = get_food_info_from_usda(food)
-            if nutrition_info:
-                warnings = []
-                for harmful in harmful_ingredients:
-                    if harmful.lower() in food.lower():
-                        warnings.append(f"Contains {harmful}, which may be harmful to health.")
-
-                food_data = {
-                    'name': food,
-                    'confidence': 0.95,  # Placeholder confidence score
-                    'nutrition': nutrition_info,
-                    'warnings': warnings
-                }
-                results.append(food_data)
-
-                # Store nutrition data for recommendations
-                user_nutritional_data['food_items'].append(food_data)
-
-        return jsonify(results)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/commit', methods=['POST'])
-def commit_nutrition_data():
-    """Endpoint for committing food details to MongoDB."""
-    try:
-        # Get data from the request
-        data = request.get_json()
+    for nutrient in details_data.get("foodNutrients", []):
+        nid = (
+            nutrient.get("nutrient", {}).get("id") or
+            nutrient.get("nutrient", {}).get("number")
+        )
         
-
-        # Extract food data and total nutrients
-        food_data = data.get('foodData', [])
-        total_nutrients = data.get('totalNutrients', {})
-
-        # Insert food data into MongoDB
-        if food_data:
-            food_collection.insert_many(food_data)
-
-        # Insert total nutrients into MongoDB
-        if total_nutrients:
-            total_nutrients_doc = {
-                "total_nutrients": total_nutrients,
-                "timestamp": datetime.now()
+        if nid in nutrient_map:
+            name = nutrient_map[nid]
+            amount_per_100g = nutrient.get("amount") or nutrient.get("value") or 0
+            unit = nutrient.get("nutrient", {}).get("unitName") or ""
+            scaled_amount = amount_per_100g * scaling_factor
+            calculated_nutrients[name] = {
+                "amount": round(scaled_amount, 2),
+                "unit": unit.lower()
             }
-            total_nutrients_collection.insert_one(total_nutrients_doc)
 
-        return jsonify({'message': 'Nutrition data successfully committed to MongoDB!'}), 200
-    except Exception as e:
-        return jsonify({'error': 'Failed to commit nutrition data. Please try again.'}), 500
+    return {
+        "food_name": actual_name,
+        "fdcId": fdc_id,
+        "requested_quantity_g": quantity_g,
+        "nutrients": calculated_nutrients
+    }
 
+# --- NUTRITION ENDPOINT ---
 
-@app.route('/getnutrition', methods=['GET'])
-def get_nutrition_data():
-    """Endpoint to get nutrition data (calories, protein, carbs, fat) from MongoDB"""
+@app.route("/get_nutrition", methods=["POST"])
+def get_nutrition_endpoint():
+    data = request.get_json()
+    food_name = data.get("food_name")
+    
     try:
-        # Query the total_nutrients collection for the latest data
-        total_nutrients = total_nutrients_collection.find().sort('timestamp', -1).limit(1)
-        if total_nutrients:
-            return jsonify([doc['total_nutrients'] for doc in total_nutrients]), 200
-        else:
-            return jsonify({'message': 'No nutrition data available'}), 404
-    except Exception as e:
-        return jsonify({'error': 'Failed to fetch nutrition data. Please try again.'}), 500
+        quantity_g = float(data.get("quantity_g", 100.0))
+    except ValueError:
+        return jsonify({"error": "Invalid quantity. Must be a number."}), 400
 
+    if not food_name:
+        return jsonify({"error": "food_name is required"}), 400
 
-@app.route('/chat', methods=['POST'])
-def chat():
-    """Endpoint for mental health chatbot interaction"""
-    user_message = request.json.get("message", "")
-    chatbot = MentalHealthChatbot(api_key=os.getenv('OPENAI_API_KEY'))
+    usda_api_key = os.environ.get("USDA_API_KEY") # Loaded from .env
+    if not usda_api_key:
+        print("❌ Critical Error: USDA_API_KEY environment variable not set on server.")
+        return jsonify({"error": "Server configuration error"}), 500
 
-    # Get response from the chatbot
-    response = chatbot.chat(user_message)
-    return jsonify({'response': response})
+    nutrition_data = get_nutrition_data(food_name, quantity_g, usda_api_key)
 
+    if not nutrition_data:
+        return jsonify({"error": f"No nutrition data found for '{food_name}'"}), 404
+        
+    return jsonify(nutrition_data), 200
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=8000)
+# --- RUN THE SERVER ---
+
+if __name__ == "__main__":
+    app.run(debug=True)
